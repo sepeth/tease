@@ -1,3 +1,5 @@
+#include <errno.h> // ENOENT
+#include <spawn.h> // posix_spawnp
 #include <stdio.h>  // fprintf
 #include <stdlib.h> // exit
 #include <stdbool.h> // bool
@@ -28,46 +30,74 @@ void error(const char* fmt, ...) {
 	va_end(ap);
 }
 
-int create_tmpfile(char* template) {
-	return mkstemp(template);
-}
-
 static char tmpfilename_in_cwd[] = "tmp.tease.XXXXXX";
 static char tmpfilename_in_tmp[] = "/tmp/tease.XXXXXX";
 
-int main() {
+int main(int argc, char* argv[], char* envp[]) {
 	// Create a temp file
 	// Capture the output
 	// Write the content to the temp file
 	// Also, grab the last line
 	// Print it
 
+	// Check inputs
+	if (argc <= 1) {
+		error("No command given!\n");
+		exit(EXIT_FAILURE);
+	}
+
+	int exit_status = EXIT_SUCCESS;
 	int tmpfd;
 	bool delete_file_in_cwd = true;
-	if ((tmpfd = create_tmpfile(tmpfilename_in_cwd)) < 0) {
+	if ((tmpfd = mkstemp(tmpfilename_in_cwd)) < 0) {
 		delete_file_in_cwd = false;
 		perror("Trying to create a temp file in the current directory has failed. Trying /tmp instead");
-		if ((tmpfd = create_tmpfile(tmpfilename_in_tmp)) < 0) {
+		if ((tmpfd = mkstemp(tmpfilename_in_tmp)) < 0) {
 			perror("Failed to create a temp file in /tmp, too. Giving up");
 			exit(EXIT_FAILURE);
 		}
 	}
 
 	// SUCCESS
+	int spawn_res = posix_spawnp(
+		/* pid */ NULL,
+		/* file */ argv[1],
+		/* file actions */ NULL,
+		/* attrp */ NULL,
+		/* argv */ argv + 1,
+		envp
+	);
 
+	if (spawn_res == ENOENT) {
+		error("Unknown command: %s\n", argv[1]);
+		exit_status = EXIT_FAILURE;
+		goto cleanup;
+	}
+
+	if (spawn_res != 0) {
+		perror("Couldn't start the process");
+		exit_status = EXIT_FAILURE;
+		goto cleanup;
+	}
+
+	printf("tease still works\n");
+
+cleanup:
 	if (delete_file_in_cwd) {
 		if (unlink(tmpfilename_in_cwd) < 0) {
 			perror("Deleting the temp file in current working dir has failed");
-			error("Please delete: %s", tmpfilename_in_cwd);
+			error("Please delete: %s\n", tmpfilename_in_cwd);
 		}
 	} else {
 		if (unlink(tmpfilename_in_tmp) < 0) {
 			perror("Deleting the temp file has failed");
-			error("You can delete this file manually: %s", tmpfilename_in_tmp);
+			error("You can delete this file manually: %s\n", tmpfilename_in_tmp);
 		}
 	}
 
 	if (close(tmpfd) < 0) {
 		perror("Cloudn't close the temp file, but that should be fine");
 	}
+
+	return exit_status;
 }
