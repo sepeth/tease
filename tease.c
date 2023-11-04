@@ -26,6 +26,9 @@
 // - The file created by tmpfile() call might be left on the fs on abnormal termination - implementation-defined.
 
 
+#define MIN(a,b) (((a)<(b))?(a):(b))
+
+
 void error(const char* fmt, ...) {
 	va_list ap;
 	va_start(ap, fmt);
@@ -140,7 +143,8 @@ int main(int argc, char* argv[], char* envp[]) {
 		} else {
 			if (file_status.st_size > last_size) {
 				// There's stuff to read
-				if (lseek(tmpfd, -1 * HOW_MANY_BYTES_FROM_THE_END, SEEK_END) < 0) {
+				int howManyBytes = MIN(HOW_MANY_BYTES_FROM_THE_END, file_status.st_size);
+				if (lseek(tmpfd, -1 * howManyBytes, SEEK_END) < 0) {
 					perror("Couldn't seek in the temp file");
 					continue;
 				}
