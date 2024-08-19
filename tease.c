@@ -12,7 +12,8 @@
 
 #define POLL_TIME_IN_MS 30
 #define FAILED_TO_WRITE_TO_STDERR 12
-#define HOW_MANY_BYTES_FROM_THE_END 200
+#define HOW_MANY_BYTES_FROM_THE_END 500
+#define PRINT_BUF_SIZE 8192
 
 // Tenets/Self-guidance:
 //
@@ -26,9 +27,6 @@
 // - The file created by tmpfile() call might be left on the fs on abnormal termination - implementation-defined.
 
 
-#define MIN(a,b) (((a)<(b))?(a):(b))
-
-
 void error(const char* fmt, ...) {
 	va_list ap;
 	va_start(ap, fmt);
@@ -38,7 +36,11 @@ void error(const char* fmt, ...) {
 	va_end(ap);
 }
 
-static char tmpfilename_in_cwd[] = "tmp.tease.XXXXXX";
+int min(int n1, int n2) {
+	return n1 < n2 ? n1 : n2;
+}
+
+static char tmpfilename_in_cwd[] = "._tease.XXXXXX";
 static char tmpfilename_in_tmp[] = "/tmp/tease.XXXXXX";
 
 int main(int argc, char* argv[], char* envp[]) {
@@ -50,7 +52,7 @@ int main(int argc, char* argv[], char* envp[]) {
 
 	// Check inputs
 	if (argc <= 1) {
-		error("No command given!\n");
+		error("usage: tease COMMAND...\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -94,7 +96,12 @@ int main(int argc, char* argv[], char* envp[]) {
 
 	// addup2 closes the dest file descr (stdout) if it is open before duplication
 	if (posix_spawn_file_actions_adddup2(&file_actions, tmpfd, STDOUT_FILENO) < 0) {
-	 perror("Couldn't connect stdout to the temp file"); goto cleanup;
+	  perror("Couldn't connect stdout to the temp file"); goto cleanup;
+	}
+
+	// addup2 closes the dest file descr (stdout) if it is open before duplication
+	if (posix_spawn_file_actions_adddup2(&file_actions, tmpfd, STDERR_FILENO) < 0) {
+	  perror("Couldn't connect stderr to the temp file"); goto cleanup;
 	}
 
 	// What to do with the stderr
@@ -143,8 +150,8 @@ int main(int argc, char* argv[], char* envp[]) {
 		} else {
 			if (file_status.st_size > last_size) {
 				// There's stuff to read
-				int howManyBytes = MIN(HOW_MANY_BYTES_FROM_THE_END, file_status.st_size);
-				if (lseek(tmpfd, -1 * howManyBytes, SEEK_END) < 0) {
+				int how_many_bytes = min(HOW_MANY_BYTES_FROM_THE_END, file_status.st_size);
+				if (lseek(tmpfd, -1 * how_many_bytes, SEEK_END) < 0) {
 					perror("Couldn't seek in the temp file");
 					continue;
 				}
@@ -171,7 +178,7 @@ int main(int argc, char* argv[], char* envp[]) {
 					}
 				}
 
-				printf("\x1B[2K\r%s", last_line + pos_of_nl + 1);
+				printf("\x1B[2K\r%s", last_line + pos_of_nl + /* add 1 if new line */ (pos_of_nl != 0));
 				fflush(stdout);
 				printed_something = true;
 
@@ -192,8 +199,24 @@ int main(int argc, char* argv[], char* envp[]) {
 			if (WIFEXITED(stat_loc) && exit_status == 0) {
 				break; // SUCCESS
 			} else {
-				printf("Child failed\n");
-				// print the full content
+				// Child failed, print the full content of the temp file
+				lseek(tmpfd, 0, SEEK_SET);
+				printf("\x1b[2K\r");
+				fflush(stdout);
+
+				char buf[8192];
+				int read_result;
+				// One less from the buffer size for C style string
+				while ((read_result = read(tmpfd, buf, PRINT_BUF_SIZE - 1)) > 0) {
+					buf[read_result] = 0;
+					printf("%s", buf);
+				}
+				if (read_result < 0) {
+					perror("Couldn't read the temp file");
+					goto cleanup;
+				}
+
+				goto cleanup; // Finish
 			}
 		}
 	}
