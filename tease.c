@@ -99,16 +99,27 @@ int main(int argc, char* argv[], char* envp[]) {
 	  perror("Couldn't connect stdout to the temp file"); goto cleanup;
 	}
 
-	// addup2 closes the dest file descr (stdout) if it is open before duplication
-	if (posix_spawn_file_actions_adddup2(&file_actions, tmpfd, STDERR_FILENO) < 0) {
+  // What to do with the stderr
+  //
+  //   - Option 1: connect to the same output as stdout (will lose what is
+  //   stdout and what is stderr)
+  //   - Option 2: connect to another file (will lose the order)
+  //   - Option 3: don't touch it, let it go to the terminal (it will be
+  //   printed before stdout if the process exit with non-zero, but better
+  //   to let the user know about the errors and shell redirections would
+  //   work).
+  //	 - Option 4: connect to the same file as stdout, but with a
+  //   different color (not sure if possible)
+  //
+  // Let's go with the option 1. Not much code, and can be converted to 4.
+  // In the future, I might change this into Option 3 since the error messages
+  // are important. For programs that spams stderr, there can be an option
+  // or use shell redirection feature like &2>1.
+  //
+  if (posix_spawn_file_actions_adddup2(&file_actions, tmpfd, STDERR_FILENO) < 0) {
 	  perror("Couldn't connect stderr to the temp file"); goto cleanup;
 	}
 
-	// What to do with the stderr
-	//  - Option 1: connect to the same output as stdout (will lose what is stdout and what is stderr) 
-	//  - Option 2: connect to another file (will lose the order)
-	//  - Option 3: don't touch it, let it go to the terminal (it will be printed before stdout if the process exit with non-zero, but better to let the user know about the errors and shell redirections would work).
-	// Let's go with the option 3. And, this is the easiest to implement (no code). Less is more once again.
 	pid_t child_pid;
 	int spawn_res = posix_spawnp(
 		/* pid */ &child_pid,
